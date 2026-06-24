@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Trophy, Users, Wallet, Clock, ChevronRight, Info } from "lucide-react";
+import { Trophy, Users, Wallet, Clock, ChevronRight, Info, Bookmark } from "lucide-react";
 import { useStellarConfig } from "@/contexts/StellarConfigContext";
+import { useWatchlist } from "@/contexts/WatchlistContext";
+import { TransactionReceiptModal } from "@/components/TransactionReceiptModal";
 import { useStellarWallet } from "@/app/providers";
 import { signTransaction } from "@stellar/freighter-api";
 import {
@@ -91,19 +93,38 @@ function StatusBadge({ status }: { status: string }) {
 
 function RoundCard({ round }: { round: GrantRound }) {
   const endDate = new Date(round.endTime * 1000).toLocaleDateString();
+  const { isProjectSaved, toggleSavedProject } = useWatchlist();
+  const isSaved = isProjectSaved(round.id);
+
   return (
-    <Link
-      href={`/grants/${round.id}`}
-      className="group flex flex-col gap-4 p-5 rounded-2xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.05] transition-all"
+    <div
+      className="group relative flex flex-col gap-4 p-5 rounded-2xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.05] transition-all cursor-pointer"
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="absolute top-4 right-4 z-10">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleSavedProject(round.id);
+          }}
+          className={`p-2 rounded-full transition-colors ${
+            isSaved ? "bg-primary/20 text-primary" : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
+          }`}
+          aria-label={isSaved ? "Remove from watchlist" : "Add to watchlist"}
+        >
+          <Bookmark className="w-4 h-4" fill={isSaved ? "currentColor" : "none"} />
+        </button>
+      </div>
+
+      <Link href={`/grants/${round.id}`} className="absolute inset-0 z-0" aria-label={`View ${round.name}`} />
+
+      <div className="flex items-start justify-between gap-3 pointer-events-none relative z-10 mr-12">
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-base truncate">{round.name}</p>
         </div>
         <StatusBadge status={round.status} />
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 pointer-events-none relative z-10">
         <Wallet className="w-4 h-4 text-primary flex-shrink-0" />
         <span className="text-foreground/50 text-sm">Matching Pool</span>
         <span className="ml-auto font-bold text-sm">
@@ -111,12 +132,12 @@ function RoundCard({ round }: { round: GrantRound }) {
         </span>
       </div>
 
-      <div className="flex items-center gap-2 text-foreground/40 text-xs">
+      <div className="flex items-center gap-2 text-foreground/40 text-xs pointer-events-none relative z-10">
         <Clock className="w-3.5 h-3.5" />
         <span>Ends {endDate}</span>
         <ChevronRight className="w-3.5 h-3.5 ml-auto group-hover:translate-x-0.5 transition-transform" />
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -154,6 +175,7 @@ function ProjectAllocationRow({
   >("idle");
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -162,6 +184,7 @@ function ProjectAllocationRow({
     setTxState("building");
     setErrorMsg(null);
     setTxHash(null);
+    setShowReceiptModal(true);
 
     try {
       const parsedAmount = parseFloat(amount);
@@ -358,63 +381,68 @@ function ProjectAllocationRow({
                   </div>
 
                   {txState === "error" && errorMsg && (
-                    <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-lg leading-relaxed">
+                    <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-lg leading-relaxed mt-2">
                       {errorMsg}
                     </div>
                   )}
                 </>
-              ) : txState === "success" ? (
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs rounded-lg space-y-2">
-                  <p className="font-bold flex items-center gap-1.5">
-                    ✓ Contribution Successful!
-                  </p>
-                  <p>You have contributed {amount} XLM to Project #{item.projectId}.</p>
-                  {txHash && (
-                    <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-emerald-500/20 font-mono text-[10px]">
-                      <span>Hash: {txHash.substring(0, 12)}...{txHash.substring(52)}</span>
-                      <a
-                        href={getExplorerUrl("tx", txHash)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary hover:underline font-bold"
-                      >
-                        View on Explorer ↗
-                      </a>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTxState("idle");
-                      setAmount("");
-                    }}
-                    className="mt-2 text-foreground/50 hover:text-foreground text-[10px] underline"
-                  >
-                    Send another contribution
-                  </button>
-                </div>
               ) : (
                 <div className="p-4 bg-white/5 border border-white/10 rounded-lg space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                    <span className="text-xs text-white/80 font-medium">
-                      {txState === "building" && "Preparing transaction..."}
-                      {txState === "simulating" && "Simulating transaction..."}
-                      {txState === "signing" && "Awaiting wallet signature..."}
-                      {txState === "submitting" && "Submitting transaction..."}
-                      {txState === "polling" && "Waiting for confirmation..."}
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {txState === "success" ? null : (
+                        <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                      )}
+                      <span className="text-xs text-white/80 font-medium">
+                        {txState === "building" && "Preparing transaction..."}
+                        {txState === "simulating" && "Simulating transaction..."}
+                        {txState === "signing" && "Awaiting wallet signature..."}
+                        {txState === "submitting" && "Submitting transaction..."}
+                        {txState === "polling" && "Waiting for confirmation..."}
+                        {txState === "success" && "Contribution Confirmed!"}
+                      </span>
+                    </div>
+                    {txState === "success" && (
+                      <button
+                        type="button"
+                        onClick={() => setShowReceiptModal(true)}
+                        className="text-xs text-primary hover:underline font-bold"
+                      >
+                        View Receipt
+                      </button>
+                    )}
                   </div>
-                  {txHash && (
-                    <p className="text-[10px] text-foreground/40 font-mono">
-                      Tx Hash: {txHash}
-                    </p>
+                  {txState === "success" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTxState("idle");
+                        setAmount("");
+                      }}
+                      className="text-foreground/50 hover:text-foreground text-[10px] underline"
+                    >
+                      Send another contribution
+                    </button>
                   )}
                 </div>
               )}
             </form>
           )}
         </div>
+      )}
+
+      {showReceiptModal && (
+        <TransactionReceiptModal
+          isOpen={showReceiptModal}
+          onOpenChange={(open) => {
+            setShowReceiptModal(open);
+            if (!open && txState === "error") setTxState("idle");
+          }}
+          status={txState === "success" ? "confirmed" : txState === "error" ? "error" : "pending"}
+          txHash={txHash}
+          amount={amount}
+          projectId={item.projectId}
+        />
       )}
     </div>
   );
@@ -517,6 +545,8 @@ export default function GrantsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSavedOnly, setShowSavedOnly] = useState(false);
+  const { isProjectSaved } = useWatchlist();
 
   useEffect(() => {
     fetch(`${API_BASE}/grants/rounds`)
@@ -544,9 +574,32 @@ export default function GrantsPage() {
       <section className="relative pt-32 pb-16 px-4">
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent pointer-events-none" />
         <div className="container mx-auto max-w-4xl relative z-10">
-          <div className="flex items-center gap-3 mb-6">
-            <Trophy className="w-7 h-7 text-primary" />
-            <h1 className="text-3xl font-bold tracking-tight">Grants</h1>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <Trophy className="w-7 h-7 text-primary" />
+              <h1 className="text-3xl font-bold tracking-tight">Grants</h1>
+            </div>
+            {!selectedSummary && rounds.length > 0 && (
+              <div className="flex items-center bg-white/5 rounded-lg p-1 border border-white/10">
+                <button
+                  onClick={() => setShowSavedOnly(false)}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    !showSavedOnly ? "bg-white/10 text-white shadow" : "text-foreground/50 hover:text-foreground"
+                  }`}
+                >
+                  All Rounds
+                </button>
+                <button
+                  onClick={() => setShowSavedOnly(true)}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                    showSavedOnly ? "bg-white/10 text-white shadow" : "text-foreground/50 hover:text-foreground"
+                  }`}
+                >
+                  <Bookmark className="w-4 h-4" />
+                  Watchlist
+                </button>
+              </div>
+            )}
           </div>
           <p className="text-foreground/50 text-base max-w-xl leading-relaxed">
             Community-funded matching rounds using quadratic funding. More contributors means more
@@ -577,11 +630,19 @@ export default function GrantsPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {rounds.map((r: GrantRound) => (
+                  {rounds
+                    .filter((r) => !showSavedOnly || isProjectSaved(r.id))
+                    .map((r: GrantRound) => (
                     <div key={r.id} onClick={() => void openRound(r.id)} className="cursor-pointer">
                       <RoundCard round={r} />
                     </div>
                   ))}
+                  {showSavedOnly && rounds.filter((r) => isProjectSaved(r.id)).length === 0 && (
+                    <div className="col-span-1 sm:col-span-2 text-center py-20 border border-white/5 rounded-2xl bg-white/[0.02]">
+                      <Bookmark className="w-10 h-10 text-foreground/20 mx-auto mb-4" />
+                      <p className="text-foreground/40">Your watchlist is empty.</p>
+                    </div>
+                  )}
                 </div>
               )}
             </>
