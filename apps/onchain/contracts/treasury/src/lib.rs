@@ -192,7 +192,17 @@ impl TreasuryContract {
             let claimed_amount = stream.claimed_amount;
             let remaining_amount = stream.total_amount - claimed_amount;
 
-            stream.beneficiary = new_beneficiary.clone();
+            if claimed_amount == 0 {
+                // No claims yet: preserve vesting schedule, just change beneficiary
+                stream.beneficiary = new_beneficiary.clone();
+            } else {
+                // Partial claims made: reset to immediate vesting of remaining amount
+                stream.claimed_amount = 0;
+                stream.total_amount = remaining_amount;
+                stream.start_time = env.ledger().timestamp();
+                stream.duration = 0;
+                stream.beneficiary = new_beneficiary.clone();
+            }
 
             // Remove old stream entry
             env.storage().persistent().remove(&old_key);
